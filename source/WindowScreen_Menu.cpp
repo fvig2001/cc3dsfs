@@ -3,6 +3,7 @@
 #include "frontend.hpp"
 #include "SFML/Audio/PlaybackDevice.hpp"
 #include "devicecapture.hpp"
+#include "InputRedirection.hpp"
 
 #define FPS_WINDOW_SIZE 64
 
@@ -2806,6 +2807,12 @@ void WindowScreen::poll_window(bool do_everything) {
 			const std::chrono::duration<double> diff = curr_time - this->last_poll_time;
 			FPSArrayInsertElement(&poll_fps, diff.count());
 			this->last_poll_time = curr_time;
+			if(this->shared_data->ir_manager != NULL) {
+				this->shared_data->ir_manager->update_joystick(ir::take_joystick_snapshot());
+				// A menu may have been opened (keyboard/controller) while the pointer was held on the bottom screen
+				if((this->ir_mouse_down || this->ir_finger_redirected) && (!this->ir_active()))
+					this->ir_release();
+			}
 			while(const std::optional event = this->m_win.pollEvent()) {
 				if(event->is<sf::Event::Closed>())
 					events_queue.emplace(EVENT_CLOSED);
@@ -2834,29 +2841,47 @@ void WindowScreen::poll_window(bool do_everything) {
 						events_queue.emplace(joystick_movement->joystickId, joystick_movement->axis, joystick_movement->position);
 				}
 				else if(const auto* mouse_pressed = event->getIf<sf::Event::MouseButtonPressed>()) {
-					if(this->shared_data->input_data.enable_mouse_input)
-						events_queue.emplace(true, mouse_pressed->button, mouse_pressed->position);
+					if(this->shared_data->input_data.enable_mouse_input) {
+						if(!this->ir_mouse_press(mouse_pressed->button, mouse_pressed->position))
+							events_queue.emplace(true, mouse_pressed->button, mouse_pressed->position);
+					}
 				}
 				else if(const auto* mouse_released = event->getIf<sf::Event::MouseButtonReleased>()) {
-					if(this->shared_data->input_data.enable_mouse_input)
-						events_queue.emplace(false, mouse_released->button, mouse_released->position);
+					if(this->shared_data->input_data.enable_mouse_input) {
+						if(!this->ir_mouse_release(mouse_released->button))
+							events_queue.emplace(false, mouse_released->button, mouse_released->position);
+					}
 				}
 				else if(const auto* mouse_movement = event->getIf<sf::Event::MouseMoved>()) {
-					if(this->shared_data->input_data.enable_mouse_input)
-						events_queue.emplace(mouse_movement->position);
+					if(this->shared_data->input_data.enable_mouse_input) {
+						if(!this->ir_mouse_move(mouse_movement->position))
+							events_queue.emplace(mouse_movement->position);
+					}
+				}
+				else if(event->is<sf::Event::FocusLost>()) {
+					this->ir_release();
 				}
 				else if(const auto* touch_began = event->getIf<sf::Event::TouchBegan>()) {
-					if(touch_began->finger < NUM_FINGERS_SUPPORTED) {
+					if(this->ir_finger_begin(touch_began->finger, touch_began->position)) {
+						// Forwarded to the 3DS instead of driving the GUI
+					}
+					else if(touch_began->finger < NUM_FINGERS_SUPPORTED) {
 						this->is_touch_currently_active[touch_began->finger] = true;
 						this->touch_position[touch_began->finger] = touch_began->position;
 					}
 				}
 				else if(const auto* touch_moved = event->getIf<sf::Event::TouchMoved>()) {
-					if(touch_moved->finger < NUM_FINGERS_SUPPORTED)
+					if(this->ir_finger_move(touch_moved->finger, touch_moved->position)) {
+						// Same as above
+					}
+					else if(touch_moved->finger < NUM_FINGERS_SUPPORTED)
 						this->touch_position[touch_moved->finger] = touch_moved->position;
 				}
 				else if(const auto* touch_ended = event->getIf<sf::Event::TouchEnded>()) {
-					if(touch_ended->finger < NUM_FINGERS_SUPPORTED)
+					if(this->ir_finger_end(touch_ended->finger)) {
+						// Same as above
+					}
+					else if(touch_ended->finger < NUM_FINGERS_SUPPORTED)
 						this->is_touch_currently_active[touch_ended->finger] = false;
 				}
 				else if(const auto* resized = event->getIf<sf::Event::Resized>()) {

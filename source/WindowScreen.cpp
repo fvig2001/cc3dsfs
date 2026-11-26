@@ -9,6 +9,7 @@
 #include "shaders_list.hpp"
 #include "devicecapture.hpp"
 #include <conversions.hpp>
+#include "InputRedirection.hpp"
 
 #define LEFT_ROUNDED_PADDING 5
 #define RIGHT_ROUNDED_PADDING 5
@@ -1940,4 +1941,113 @@ void WindowScreen::process_own_out_text_data(bool print_to_notification) {
 			this->print_notification(this->own_out_text_data.small_text, this->own_out_text_data.kind);
 		this->own_out_text_data.consumed = true;
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Input redirection: forward clicks/touches on the bottom screen to the 3DS
+// ---------------------------------------------------------------------------
+
+// Only while the plain video view is showing (no menu), on a window which shows
+// the bottom screen, and when capturing a 3DS (InputRedirection doesn't exist for DS).
+bool WindowScreen::ir_active() {
+	if((this->shared_data == NULL) || (this->shared_data->ir_manager == NULL))
+		return false;
+	if(!this->shared_data->ir_manager->is_touch_redirect_active())
+		return false;
+	if(this->curr_menu != DEFAULT_MENU_TYPE)
+		return false;
+	if(this->m_stype == ScreenType::TOP)
+		return false;
+	if(this->display_data->last_connected_ds)
+		return false;
+	return true;
+}
+
+// Converts a window pixel position to 3DS bottom screen coordinates (0-319, 0-239).
+// Returns false if the position is not over the bottom screen.
+bool WindowScreen::ir_map_to_touch(sf::Vector2i window_pos, int &x, int &y) {
+	const sf::RectangleShape &rect = this->m_out_rect_bot.out_rect;
+	const sf::Vector2f size = rect.getSize();
+	if(!is_size_valid(size))
+		return false;
+	// The inverse transform undoes position, rotation and scale (which includes PAR and non-integer scaling)
+	const sf::Vector2f point = this->m_win.mapPixelToCoords(window_pos, this->m_view);
+	const sf::Vector2f local = rect.getInverseTransform().transformPoint(point);
+	if((local.x < 0.0f) || (local.y < 0.0f) || (local.x >= size.x) || (local.y >= size.y))
+		return false;
+	// The shown area may be a crop of the 3DS bottom screen
+	std::vector<const CropData*> *crops = this->get_crop_data_vector(&this->loaded_info);
+	int crop_index = *this->get_crop_index_ptr(&this->loaded_info);
+	if((crop_index < 0) || (crop_index >= (int)crops->size()))
+		crop_index = 0;
+	const CropData *crop = (*crops)[crop_index];
+	x = crop->bot_x + (int)((local.x / size.x) * crop->bot_width);
+	y = crop->bot_y + (int)((local.y / size.y) * crop->bot_height);
+	x = std::min(std::max(x, 0), ir::TOUCH_SCREEN_WIDTH - 1);
+	y = std::min(std::max(y, 0), ir::TOUCH_SCREEN_HEIGHT - 1);
+	return true;
+}
+
+void WindowScreen::ir_release() {
+	if((this->ir_mouse_down || this->ir_finger_redirected) && this->shared_data && this->shared_data->ir_manager)
+		this->shared_data->ir_manager->release_touch();
+	this->ir_mouse_down = false;
+	this->ir_finger_redirected = false;
+}
+
+// The functions below return true if the event was consumed (the menu code shouldn't see it).
+
+bool WindowScreen::ir_mouse_press(sf::Mouse::Button button, sf::Vector2i position) {
+	int x, y;
+	if((button != sf::Mouse::Button::Left) || (!this->ir_active()) || (!this->ir_map_to_touch(position, x, y)))
+		return false;
+	this->shared_data->ir_manager->set_touch(x, y);
+	this->ir_mouse_down = true;
+	return true;
+}
+
+bool WindowScreen::ir_mouse_release(sf::Mouse::Button button) {
+	if((button != sf::Mouse::Button::Left) || (!this->ir_mouse_down))
+		return false;
+	this->ir_release();
+	return true;
+}
+
+bool WindowScreen::ir_mouse_move(sf::Vector2i position) {
+	if(!this->ir_mouse_down)
+		return false;
+	int x, y;
+	// Dragging off the screen (or opening a menu meanwhile) lifts the stylus
+	if(this->ir_active() && this->ir_map_to_touch(position, x, y))
+		this->shared_data->ir_manager->set_touch(x, y);
+	else
+		this->ir_release();
+	return true;
+}
+
+bool WindowScreen::ir_finger_begin(unsigned int finger, sf::Vector2i position) {
+	int x, y;
+	if((finger != 0) || (!this->ir_active()) || (!this->ir_map_to_touch(position, x, y)))
+		return false;
+	this->shared_data->ir_manager->set_touch(x, y);
+	this->ir_finger_redirected = true;
+	return true;
+}
+
+bool WindowScreen::ir_finger_move(unsigned int finger, sf::Vector2i position) {
+	if((finger != 0) || (!this->ir_finger_redirected))
+		return false;
+	int x, y;
+	if(this->ir_active() && this->ir_map_to_touch(position, x, y))
+		this->shared_data->ir_manager->set_touch(x, y);
+	else
+		this->ir_release();
+	return true;
+}
+
+bool WindowScreen::ir_finger_end(unsigned int finger) {
+	if((finger != 0) || (!this->ir_finger_redirected))
+		return false;
+	this->ir_release();
+	return true;
 }

@@ -110,9 +110,12 @@ struct InputData {
 	ExtraButtonShortcuts extra_button_shortcuts;
 };
 
+namespace ir { class Manager; }
+
 struct SharedData {
 	InputData input_data;
 	volatile bool periodic_connection_try = false;
+	ir::Manager *ir_manager = NULL; // Input redirection to a 3DS. Not owned.
 };
 
 #pragma pack(push, 1)

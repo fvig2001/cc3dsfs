@@ -132,6 +132,15 @@ _Note: Currently only tested using a PS5 controller._
 
 _Note: The volume is independent of the actual volume level set with the physical slider on the console._
 
+## Input redirection (3DS)
+
+cc3dsfs can send controller and touch input to a 3DS running [InputRedirection](https://github.com/TuxSH/InputRedirection), using the same 20-byte UDP protocol (port 4950) as [InputRedirectionClient](https://github.com/TuxSH/InputRedirectionClient-Qt). The logic is a port of [jojo8356/InputRedirectionClient](https://github.com/jojo8356/InputRedirectionClient).
+
+- Start with `--ir_ip <3DS IP>`, or set `enabled=1` and `ip=` in `input_redirection.cfg` (same folder as the other configs).
+- **Touch:** while no menu is open, left click (or touch) on the bottom screen is sent to the 3DS as a stylus touch. This accounts for rotation, scaling, pixel aspect ratio and cropping. Left click/touch on the top screen, right click, Enter and the controller still work as before. While touch redirection is on, a touch on the bottom screen does not trigger the long-press that opens the menu; long-press the top screen instead.
+- **Reconnection:** the 3DS side is UDP, so it is never really "connected". If the socket or address fails (network change, 3DS rebooting, hostname not resolving yet), the socket is rebuilt and the host re-resolved, retrying every 0.5s up to 5s. A notification shows when it starts failing and when it recovers. Note that a "sending" status means packets are leaving this computer, not that the 3DS received them. The capture card side uses the existing *Periodic connection try* option, which is now on by default.
+- **Settings** (all in `input_redirection.cfg`): `invert_y`, `invert_ab`, `invert_xy`, 19 bindings (`bind_a`, `bind_b`, ..., `bind_touch1`, `bind_touch2`) written as `button:N`, `axis+:N`, `axis-:N` or `none`, touch presets (`touch1_x/y`, `touch2_x/y`), `deadzone`, `touch_offset_x/y`, and which axes are the sticks. Axis numbers follow SFML's order: 0=X, 1=Y, 2=Z, 3=R, 4=U, 5=V, 6=PovX, 7=PovY. Use `--list_joysticks` to see what SFML detects.
+
 ## Profiles/Layouts
 
 When starting the program for the first time, a message indicating a load failure for the cc3dsfs.cfg file will be displayed, and the same will occur when attempting to load from any given layout file if it hasn't been saved to before. That is normal. These files must be created by the program first before they can be loaded from. The program saves its current configuration to the cc3dsfs.cfg file when the program is successfully closed, creating the file if it doesn't already exist, and loading from it every time at startup.

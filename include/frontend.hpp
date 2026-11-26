@@ -170,6 +170,18 @@ private:
 	HeldTime right_click_action;
 	HeldTime controller_button_action;
 	bool consumed_touch_long_press;
+	// Input redirection (touch forwarded to a 3DS). See InputRedirection.hpp
+	bool ir_mouse_down = false;
+	bool ir_finger_redirected = false;
+	bool ir_active();
+	bool ir_map_to_touch(sf::Vector2i window_pos, int &x, int &y);
+	void ir_release();
+	bool ir_mouse_press(sf::Mouse::Button button, sf::Vector2i position);
+	bool ir_mouse_release(sf::Mouse::Button button);
+	bool ir_mouse_move(sf::Vector2i position);
+	bool ir_finger_begin(unsigned int finger, sf::Vector2i position);
+	bool ir_finger_move(unsigned int finger, sf::Vector2i position);
+	bool ir_finger_end(unsigned int finger);
 	bool can_create_small_touches = true;
 	bool is_touch_currently_active[NUM_FINGERS_SUPPORTED];
 	sf::Vector2i touch_position[NUM_FINGERS_SUPPORTED];

@@ -1,3 +1,4 @@
+#include "InputRedirection.hpp"
 #include <SFML/Audio.hpp>
 #include <SFML/Graphics.hpp>
 
@@ -46,6 +47,7 @@ struct override_all_data {
 	int volume = DEFAULT_NO_VOLUME_VALUE;
 	bool always_prevent_mouse_showing = false;
 	bool auto_connect_to_first = false;
+	std::string ir_ip = "";
 	bool auto_close = false;
 	bool force_disable_nisetro_ds = false;
 	bool force_disable_optimize_old_3ds = false;
@@ -722,6 +724,20 @@ static int mainVideoOutputCall(AudioData* audio_data, CaptureData* capture_data,
 	frontend_data.display_data.force_disable_mouse = override_data.always_prevent_mouse_showing;
 	frontend_data.reload = true;
 	bool skip_io = false;
+	// Input redirection to a 3DS. Kept apart from the layouts/profiles, as it is about the
+	// user's controller and 3DS, not about how the screens are shown.
+	ir::Manager ir_manager;
+	const std::string ir_cfg_path = get_base_path(false) + "input_redirection.cfg";
+	frontend_data.shared_data.ir_manager = &ir_manager;
+	if((!skip_io) && (!override_data.recovery_mode))
+		ir_manager.load(ir_cfg_path);
+	if(override_data.ir_ip != "") {
+		ir::Config ir_config = ir_manager.get_config();
+		ir_config.ip = override_data.ir_ip;
+		ir_config.enabled = true;
+		ir_manager.set_config(ir_config);
+	}
+	ir_manager.start();
 	bool did_first_connection = false;
 	const double max_time_no_frames_allowed = MAX_ALLOWED_NO_FRAME_TIME;
 	std::chrono::time_point<std::chrono::high_resolution_clock> start_time = std::chrono::high_resolution_clock::now();
@@ -920,6 +936,11 @@ static int mainVideoOutputCall(AudioData* audio_data, CaptureData* capture_data,
 			UpdateOutText(out_text_data, "", audio_data->text_to_print(), TEXT_KIND_NORMAL);
 		}
 
+		ir::Status ir_status;
+		std::string ir_text;
+		if(ir_manager.consume_status_change(ir_status, ir_text))
+			UpdateOutText(out_text_data, ir_text, ir_text, (ir_status == ir::Status::RETRYING) ? TEXT_KIND_WARNING : TEXT_KIND_NORMAL);
+
 		if(capture_data->status.new_error_text) {
 			UpdateOutText(out_text_data, capture_data->status.detailed_error_text, capture_data->status.graphical_error_text, TEXT_KIND_ERROR);
 			capture_data->status.new_error_text = false;
@@ -939,6 +960,10 @@ static int mainVideoOutputCall(AudioData* audio_data, CaptureData* capture_data,
 
 	if(override_data.print_controller_list)
 		joystick_print_all(false);
+
+	ir_manager.stop();
+	if(!skip_io)
+		ir_manager.save(ir_cfg_path);
 
 	top_screen->end();
 	bot_screen->end();
@@ -1139,6 +1164,8 @@ int main(int argc, char **argv) {
 			continue;
 		if(parse_string_arg(i, argc, argv, touch_file_path, "--touch_file"))
 			continue;
+		if(parse_string_arg(i, argc, argv, override_data.ir_ip, "--ir_ip"))
+			continue;
 		#ifdef RASPI
 		if(parse_int_arg(i, argc, argv, page_up_id, "--pi_select"))
 			continue;
@@ -1196,6 +1223,8 @@ int main(int argc, char **argv) {
 		ActualConsoleOutText("  --no_auto_save    Disables automatic save when closing the software.");
 		ActualConsoleOutText("  --list_joysticks  Prints a list of all the detected joysticks.");
 		ActualConsoleOutText("  --touch_file      Path of a file that the program should create when exiting.");
+		ActualConsoleOutText("  --ir_ip IP        Sends controller/touch input to the 3DS at IP (InputRedirection).");
+		ActualConsoleOutText("                    Enables input redirection and saves the address.");
 		#ifdef RASPI
 		ActualConsoleOutText("  --pi_select ID    Specifies ID for the select GPIO button.");
 		ActualConsoleOutText("  --pi_menu ID      Specifies ID for the menu GPIO button.");
