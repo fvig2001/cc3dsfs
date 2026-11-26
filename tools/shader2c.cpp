@@ -32,6 +32,14 @@ vector<string> split_str_by_char(string str_to_split, char split_char) {
 	return result;
 }
 
+// Files checked out with Windows line endings (e.g. git's core.autocrlf=true) leave a '\r'
+// at the end of every line read with getline. Left in, it ends up inside the generated
+// string literals, and also stops the "= x;" check below from matching.
+static void strip_trailing_cr(string &line) {
+	if(!line.empty() && (line.back() == '\r'))
+		line.pop_back();
+}
+
 inline bool str_ends_with(string const &value, string const &ending)
 {
     if(ending.size() > value.size()) return false;
@@ -59,8 +67,10 @@ int process_file(filesystem::path input_path, ofstream &output) {
 	}
 	vector<string> file_lines;
 	string single_str = "";
-	while (getline(input, single_str))
+	while (getline(input, single_str)) {
+		strip_trailing_cr(single_str);
 		file_lines.push_back(single_str);
+	}
 
 	input.close();
 
@@ -115,8 +125,10 @@ int main(int argc, char *argv[]) {
 	}
 	vector<string> file_lines;
 	string single_str = "";
-	while (getline(input, single_str))
+	while (getline(input, single_str)) {
+		strip_trailing_cr(single_str);
 		file_lines.push_back(single_str);
+	}
 
 	input.close();
 

@@ -75,6 +75,7 @@ void Config::set_defaults() {
 	this->bindings[SLOT_DOWN] = axis_input(false, 7);
 	this->bindings[SLOT_ZL] = axis_input(true, 2);     // Z (left trigger)
 	this->bindings[SLOT_ZR] = axis_input(true, 3);     // R (right trigger)
+	this->bindings[SLOT_HOME] = button_input(8);     // guide	
 	this->invert_y = false;
 	this->invert_ab = true;
 	this->invert_xy = true;
