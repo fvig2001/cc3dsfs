@@ -189,5 +189,7 @@ The CC3DSFS\_CFG\_DIR environment variable can be used to specify a different ta
 ### Aggressive Reconnect
 - This fork makes the application reconnect a little more aggressively. Like it will reconnect after a disconnect within 5 seconds
 
+Used Claude to port Input Redirect Features due to laziness.
+
 
 
