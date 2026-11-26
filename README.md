@@ -182,3 +182,12 @@ The CC3DSFS\_CFG\_DIR environment variable can be used to specify a different ta
 - When using IS Nitro Emulator, IS Nitro Capture or IS TWL Capture devices on Windows, cc3dsfs is compatible with both the official driver and WinUSB, with the latter being useful if you don't have access to the official driver. To install and use WinUSB, plug in your device, download a software to install drivers like [Zadig](https://zadig.akeo.ie/), select the device in question and select WinUSB. Then install the driver and wait for it to finish. The devices should now work properly with this application.
 ### Partner CTR Capture
 - When using Partner CTR Capture devices on Windows, cc3dsfs is compatible with both the official driver and libusb-win32 (or alternatives), with the latter being useful if you don't have access to the official driver. To install and use libusb-win32 (or alternatives), plug in your device, download a software to install drivers like [Zadig](https://zadig.akeo.ie/), select the device in question and select libusb-win32 (or alternatives). Then install the driver and wait for it to finish. The devices should now work properly with this application.
+### Input Redirect Feature
+- Supports input redirect using controller connected to the device (Should disable controller input on the application itself)
+- Supports input redirect using mouse/touch
+- To use input redirect, you need to update the config file found at .config/cc3dsfs/input_redirection.cfg and update the ip address and settings
+### Aggressive Reconnect
+- This fork makes the application reconnect a little more aggressively. Like it will reconnect after a disconnect within 5 seconds
+
+
+
