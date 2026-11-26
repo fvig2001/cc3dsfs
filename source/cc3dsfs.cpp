@@ -48,6 +48,7 @@ struct override_all_data {
 	bool always_prevent_mouse_showing = false;
 	bool auto_connect_to_first = false;
 	std::string ir_ip = "";
+	bool ir_debug = false;
 	bool auto_close = false;
 	bool force_disable_nisetro_ds = false;
 	bool force_disable_optimize_old_3ds = false;
@@ -941,6 +942,34 @@ static int mainVideoOutputCall(AudioData* audio_data, CaptureData* capture_data,
 		if(ir_manager.consume_status_change(ir_status, ir_text))
 			UpdateOutText(out_text_data, ir_text, ir_text, (ir_status == ir::Status::RETRYING) ? TEXT_KIND_WARNING : TEXT_KIND_NORMAL);
 
+		if(override_data.ir_debug) {
+			static ir::JoystickSnapshot ir_debug_prev;
+			const ir::JoystickSnapshot ir_debug_now = ir_manager.get_joystick_snapshot();
+			for(int b = 0; b < ir::MAX_JOY_BUTTONS; b++)
+				if(ir_debug_now.buttons[b] != ir_debug_prev.buttons[b])
+					ActualConsoleOutText("IR debug: button:" + std::to_string(b) + (ir_debug_now.buttons[b] ? " pressed" : " released"));
+			for(int a = 0; a < ir::NUM_JOY_AXES; a++) {
+				// Only report when crossing the same +/-0.5 threshold the bindings use
+				const int now_state = (ir_debug_now.axes[a] > 0.5f) ? 1 : ((ir_debug_now.axes[a] < -0.5f) ? -1 : 0);
+				const int prev_state = (ir_debug_prev.axes[a] > 0.5f) ? 1 : ((ir_debug_prev.axes[a] < -0.5f) ? -1 : 0);
+				if(now_state != prev_state)
+					ActualConsoleOutText("IR debug: axis " + std::to_string(a) + ((now_state == 1) ? " is above +0.5 (axis+:" : ((now_state == -1) ? " is below -0.5 (axis-:" : " back to center (axis:")) + std::to_string(a) + ")");
+			}
+			ir_debug_prev = ir_debug_now;
+
+			// What is actually being sent to the 3DS. Buttons are active-low (a 1 means released).
+			static uint8_t ir_debug_prev_frame[ir::FRAME_SIZE] = {};
+			uint8_t ir_debug_frame[ir::FRAME_SIZE];
+			ir_manager.get_last_frame(ir_debug_frame);
+			if(memcmp(ir_debug_frame, ir_debug_prev_frame, ir::FRAME_SIZE) != 0) {
+				auto word = [&](int i) { return (uint32_t)ir_debug_frame[i] | ((uint32_t)ir_debug_frame[i + 1] << 8) | ((uint32_t)ir_debug_frame[i + 2] << 16) | ((uint32_t)ir_debug_frame[i + 3] << 24); };
+				std::ostringstream ir_debug_text;
+				ir_debug_text << std::hex << std::uppercase << "IR debug: sending buttons=0x" << word(0) << " touch=0x" << word(4) << " circlepad=0x" << word(8) << " cstick=0x" << word(12) << " interface(home=bit0,power=bit1,power_long=bit2)=0x" << word(16);
+				ActualConsoleOutText(ir_debug_text.str());
+				memcpy(ir_debug_prev_frame, ir_debug_frame, ir::FRAME_SIZE);
+			}
+		}
+
 		if(capture_data->status.new_error_text) {
 			UpdateOutText(out_text_data, capture_data->status.detailed_error_text, capture_data->status.graphical_error_text, TEXT_KIND_ERROR);
 			capture_data->status.new_error_text = false;
@@ -1166,6 +1195,8 @@ int main(int argc, char **argv) {
 			continue;
 		if(parse_string_arg(i, argc, argv, override_data.ir_ip, "--ir_ip"))
 			continue;
+		if(parse_existence_arg(i, argv, override_data.ir_debug, true, "--ir_debug"))
+			continue;
 		#ifdef RASPI
 		if(parse_int_arg(i, argc, argv, page_up_id, "--pi_select"))
 			continue;
@@ -1225,6 +1256,7 @@ int main(int argc, char **argv) {
 		ActualConsoleOutText("  --touch_file      Path of a file that the program should create when exiting.");
 		ActualConsoleOutText("  --ir_ip IP        Sends controller/touch input to the 3DS at IP (InputRedirection).");
 		ActualConsoleOutText("                    Enables input redirection and saves the address.");
+		ActualConsoleOutText("  --ir_debug        Prints which controller buttons/axes are pressed (to find the numbers for bindings).");
 		#ifdef RASPI
 		ActualConsoleOutText("  --pi_select ID    Specifies ID for the select GPIO button.");
 		ActualConsoleOutText("  --pi_menu ID      Specifies ID for the menu GPIO button.");

@@ -21,7 +21,7 @@ namespace ir {
 
 static const char* const slot_names[SLOT_COUNT] = {
 	"a", "b", "x", "y",
-	"up", "down", "left", "right",
+	"down", "up", "left", "right",
 	"l", "r", "select", "start",
 	"zl", "zr",
 	"home", "power", "power_long",
@@ -76,8 +76,8 @@ void Config::set_defaults() {
 	this->bindings[SLOT_ZL] = axis_input(true, 2);     // Z (left trigger)
 	this->bindings[SLOT_ZR] = axis_input(true, 3);     // R (right trigger)
 	this->invert_y = false;
-	this->invert_ab = false;
-	this->invert_xy = false;
+	this->invert_ab = true;
+	this->invert_xy = true;
 	this->touch1_x = this->touch1_y = this->touch2_x = this->touch2_y = 0;
 	this->deadzone = 0.15f;
 	this->touch_offset_x = this->touch_offset_y = 0;
@@ -523,6 +523,16 @@ void Manager::update_joystick(const JoystickSnapshot &snapshot) {
 	this->joy = snapshot;
 }
 
+void Manager::get_last_frame(uint8_t out[FRAME_SIZE]) const {
+	std::lock_guard<std::mutex> lock(this->mtx);
+	memcpy(out, this->last_frame, FRAME_SIZE);
+}
+
+JoystickSnapshot Manager::get_joystick_snapshot() const {
+	std::lock_guard<std::mutex> lock(this->mtx);
+	return this->joy;
+}
+
 void Manager::set_touch(int x, int y) {
 	std::lock_guard<std::mutex> lock(this->mtx);
 	this->touch = {true, x, y};
@@ -584,6 +594,7 @@ void Manager::build_frame(uint8_t out[FRAME_SIZE], bool neutral) {
 	}
 	RawState raw = resolve_joystick(this->joy, this->config);
 	encode_frame(out, raw, this->touch, this->ui_interface_bits, this->config);
+	memcpy(this->last_frame, out, FRAME_SIZE);
 }
 
 void Manager::thread_main() {

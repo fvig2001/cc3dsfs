@@ -145,6 +145,8 @@ public:
 
 	// Called from the thread(s) which pump the window events.
 	void update_joystick(const JoystickSnapshot &snapshot);
+	JoystickSnapshot get_joystick_snapshot() const;
+	void get_last_frame(uint8_t out[FRAME_SIZE]) const; // Last frame built for sending (debugging)
 	// Coordinates are in 3DS bottom screen pixels (0-319, 0-239).
 	void set_touch(int x, int y);
 	void release_touch();
@@ -168,6 +170,7 @@ private:
 	JoystickSnapshot joy;
 	TouchState touch;
 	uint32_t ui_interface_bits = 0;
+	uint8_t last_frame[FRAME_SIZE] = {};
 	Status status = Status::DISABLED;
 	Status last_reported_status = Status::DISABLED;
 	std::atomic<bool> touch_redirect_active{false};
