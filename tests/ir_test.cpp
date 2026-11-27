@@ -31,7 +31,8 @@ static void test_default_frame() {
 	CHECK_EQ(rd32(f + 16), 0);
 }
 static void test_a_clears_bit0() {
-	Config cfg; RawState raw; raw.active[SLOT_A] = true;
+	Config cfg; cfg.invert_ab = false; // Explicit: don't depend on whatever the default is
+	RawState raw; raw.active[SLOT_A] = true;
 	CHECK_EQ(map_buttons(raw, cfg), 0xFFF & ~1u);
 }
 static void test_ab_swap() {
@@ -147,6 +148,106 @@ static void test_config_garbage() {
 	CHECK(c.ip == "1.2.3.4");                               // CRLF tolerated
 }
 
+// ---- IPv4 helpers and autosave (used by the Input Redirection menus) ----
+static void test_parse_ipv4_valid() {
+	int o[4] = {-1, -1, -1, -1};
+	CHECK(parse_ipv4("192.168.85.200", o));
+	CHECK(o[0] == 192 && o[1] == 168 && o[2] == 85 && o[3] == 200);
+	CHECK(parse_ipv4("0.0.0.0", o) && o[0] == 0 && o[3] == 0);
+	CHECK(parse_ipv4("255.255.255.255", o) && o[0] == 255 && o[3] == 255);
+	CHECK(parse_ipv4("010.001.000.007", o) && o[0] == 10 && o[1] == 1 && o[3] == 7); // 3-digit zero padding is accepted
+}
+static void test_parse_ipv4_invalid() {
+	const char *bad[] = {"", "1.2.3", "1.2.3.4.5", "256.1.1.1", "1.2.3.999", "1.2.3.", ".1.2.3", "1..2.3",
+		"a.b.c.d", "1.2.3.4 ", " 1.2.3.4", "1.2.3.4\n", "1,2,3,4", "my-3ds.local", "1.2.3.-4", "1234.1.1.1", "192.168.1.1/24"};
+	for(const char *text : bad) {
+		int o[4] = {7, 7, 7, 7};
+		bool ok = parse_ipv4(text, o);
+		if(ok) printf("  accepted bad ip: '%s'\n", text);
+		CHECK(!ok);
+		CHECK(o[0] == 7 && o[1] == 7 && o[2] == 7 && o[3] == 7); // untouched on failure
+	}
+}
+static void test_format_and_step() {
+	int o[4] = {192, 168, 85, 200};
+	CHECK(format_ipv4(o) == "192.168.85.200");
+	int clamp[4] = {-5, 300, 0, 255};
+	CHECK(format_ipv4(clamp) == "0.255.0.255");
+	CHECK_EQ(step_octet(250, 10), 4);     // wraps up
+	CHECK_EQ(step_octet(0, -1), 255);     // wraps down
+	CHECK_EQ(step_octet(5, -10), 251);
+	CHECK_EQ(step_octet(100, 100), 200);
+	CHECK_EQ(step_octet(200, 100), 44);
+	CHECK_EQ(step_octet(0, 0), 0);
+	// Round trip through parse/format
+	int r[4]; CHECK(parse_ipv4(format_ipv4(o), r)); CHECK(r[0] == 192 && r[3] == 200);
+}
+static void test_adjust_ipv4_octet() {
+	CHECK(adjust_ipv4_octet("", 0, 10) == "10.0.0.0");                    // starting from nothing
+	CHECK(adjust_ipv4_octet("192.168.85.200", 3, 100) == "192.168.85.44"); // wraps past 255
+	CHECK(adjust_ipv4_octet("1.2.0.4", 2, -1) == "1.2.255.4");             // wraps below 0
+	CHECK(adjust_ipv4_octet("my-3ds.local", 1, 1) == "0.1.0.0");           // hostname: starts from zeros
+	CHECK(adjust_ipv4_octet("1.2.3.4", 4, 5) == "1.2.3.4");                // bad octet index: unchanged
+	CHECK(adjust_ipv4_octet("1.2.3.4", -1, 5) == "1.2.3.4");
+	CHECK(adjust_ipv4_octet("10.0.0.1", 0, 0) == "10.0.0.1");
+	// Other octets are never touched
+	CHECK(adjust_ipv4_octet("11.22.33.44", 1, 1) == "11.23.33.44");
+}
+// What a user does in the menus: type an address with the < > buttons, toggle it on. Each change is saved.
+static void test_menu_flow_autosaves_each_step() {
+	remove("/tmp/ir_flow.cfg");
+	Manager m;
+	m.set_autosave_path("/tmp/ir_flow.cfg");
+	// 192.168.85.200 using step 10/1/100 presses, like the IP editor does
+	struct { int octet; int delta; int times; } presses[] = {
+		{0, 100, 1}, {0, 10, 9}, {0, 1, 2},     // 100 + 90 + 2 = 192
+		{1, 100, 1}, {1, 10, 6}, {1, 1, 8},     // 168
+		{2, 10, 8}, {2, 1, 5},                  // 85
+		{3, 100, 2},                             // 200
+	};
+	for(auto &p : presses) for(int i = 0; i < p.times; i++) {
+		Config c = m.get_config();
+		c.ip = adjust_ipv4_octet(c.ip, p.octet, p.delta);
+		CHECK(m.update_config_and_save(c));
+	}
+	CHECK(m.get_config().ip == "192.168.85.200");
+	Config c = m.get_config(); c.enabled = !c.enabled; CHECK(m.update_config_and_save(c)); // the toggle row
+	Config fromdisk; CHECK_EQ(load_config("/tmp/ir_flow.cfg", fromdisk), 0);
+	CHECK(fromdisk.ip == "192.168.85.200" && fromdisk.enabled);
+	// And it survives a "restart": a new manager loading that file starts out the same
+	Manager restarted; CHECK_EQ(restarted.load("/tmp/ir_flow.cfg"), 0);
+	CHECK(restarted.get_config().ip == "192.168.85.200" && restarted.get_config().enabled);
+}
+static void test_autosave() {
+	remove("/tmp/ir_autosave.cfg");
+	Manager m; // not started: only the config handling is tested
+	Config c; c.enabled = true; c.ip = "10.0.0.5";
+	CHECK(m.update_config_and_save(c)); // no autosave path yet: applies, writes nothing
+	FILE *f = fopen("/tmp/ir_autosave.cfg", "r"); CHECK(f == NULL); if(f) fclose(f);
+	m.set_autosave_path("/tmp/ir_autosave.cfg");
+	c.ip = "192.168.85.200"; c.enabled = false;
+	CHECK(m.update_config_and_save(c));
+	Config loaded; CHECK_EQ(load_config("/tmp/ir_autosave.cfg", loaded), 0);
+	CHECK(loaded.ip == "192.168.85.200" && !loaded.enabled);
+	// A later change overwrites it, so the file always matches the latest settings
+	c.enabled = true; c.ip = "172.16.0.9";
+	CHECK(m.update_config_and_save(c));
+	Config again; CHECK_EQ(load_config("/tmp/ir_autosave.cfg", again), 0);
+	CHECK(again.ip == "172.16.0.9" && again.enabled);
+	CHECK(m.get_config().ip == "172.16.0.9");
+	// Other settings aren't lost when the menu only changes ip/enabled
+	Config custom = m.get_config(); custom.invert_y = true; custom.bindings[SLOT_HOME] = PhysicalInput{PhysicalInput::BUTTON, 9};
+	CHECK(m.update_config_and_save(custom));
+	custom.ip = "1.2.3.4"; CHECK(m.update_config_and_save(custom));
+	Config check; CHECK_EQ(load_config("/tmp/ir_autosave.cfg", check), 0);
+	CHECK(check.invert_y && check.bindings[SLOT_HOME] == custom.bindings[SLOT_HOME] && check.ip == "1.2.3.4");
+	// Unwritable location: reports failure but still applies the config
+	m.set_autosave_path("/nonexistent_dir_xyz/ir.cfg");
+	c.ip = "9.9.9.9";
+	CHECK(!m.update_config_and_save(c));
+	CHECK(m.get_config().ip == "9.9.9.9");
+}
+
 // ---- Live network tests (loopback, port 4950) ----
 static int open_receiver() {
 	int s = socket(AF_INET, SOCK_DGRAM, 0);
@@ -231,6 +332,7 @@ int main() {
 	test_touch_encoding(); test_circle_pad_full_right(); test_cpp_ir();
 	test_stick_up_is_high_y(); test_deadzone(); test_no_joystick(); test_default_bindings();
 	test_touch_offset_and_presets(); test_config_roundtrip(); test_config_garbage();
+	test_parse_ipv4_valid(); test_parse_ipv4_invalid(); test_format_and_step(); test_adjust_ipv4_octet(); test_menu_flow_autosaves_each_step(); test_autosave();
 	test_manager_send_and_touch(); test_manager_reconnect(); test_manager_no_ip();
 	if(failures == 0) printf("ALL TESTS PASSED\n");
 	else printf("%d FAILURE(S)\n", failures);

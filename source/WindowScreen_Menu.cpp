@@ -122,6 +122,8 @@ void WindowScreen::init_menus() {
 	this->resolution_menu = new ResolutionMenu(this->text_rectangle_pool);
 	this->fileconfig_menu = new FileConfigMenu(this->text_rectangle_pool);
 	this->extra_menu = new ExtraSettingsMenu(this->text_rectangle_pool);
+	this->input_redirection_menu = new InputRedirectionMenu(this->text_rectangle_pool);
+	this->input_redirection_ip_menu = new InputRedirectionIPMenu(this->text_rectangle_pool);
 	this->status_menu = new StatusMenu(this->text_rectangle_pool);
 	this->license_menu = new LicenseMenu(this->text_rectangle_pool);
 	this->shortcut_menu = new ShortcutMenu(this->text_rectangle_pool);
@@ -158,6 +160,8 @@ void WindowScreen::destroy_menus() {
 	delete this->resolution_menu;
 	delete this->fileconfig_menu;
 	delete this->extra_menu;
+	delete this->input_redirection_menu;
+	delete this->input_redirection_ip_menu;
 	delete this->status_menu;
 	delete this->license_menu;
 	delete this->shortcut_menu;
@@ -1190,6 +1194,48 @@ void WindowScreen::setup_extra_menu(bool reset_data) {
 	}
 }
 
+void WindowScreen::setup_input_redirection_menu(bool reset_data) {
+	if(!this->can_setup_menu())
+		return;
+	if(this->curr_menu != INPUT_REDIRECTION_MENU_TYPE) {
+		this->switch_to_menu(INPUT_REDIRECTION_MENU_TYPE, this->input_redirection_menu, reset_data);
+		this->input_redirection_menu->insert_data();
+	}
+}
+
+void WindowScreen::setup_input_redirection_ip_menu(bool reset_data) {
+	if(!this->can_setup_menu())
+		return;
+	if(this->curr_menu != INPUT_REDIRECTION_IP_MENU_TYPE) {
+		this->switch_to_menu(INPUT_REDIRECTION_IP_MENU_TYPE, this->input_redirection_ip_menu, reset_data);
+		this->input_redirection_ip_menu->insert_data();
+	}
+}
+
+// Applies a changed Input Redirection config and saves it to input_redirection.cfg right away
+void WindowScreen::input_redirection_apply(const ir::Config &config) {
+	if(this->shared_data->ir_manager == NULL)
+		return;
+	if(!this->shared_data->ir_manager->update_config_and_save(config))
+		this->print_notification("Input Redirection: couldn't save the settings", TEXT_KIND_WARNING);
+}
+
+void WindowScreen::input_redirection_enabled_change() {
+	if(this->shared_data->ir_manager == NULL)
+		return;
+	ir::Config config = this->shared_data->ir_manager->get_config();
+	config.enabled = !config.enabled;
+	this->input_redirection_apply(config);
+}
+
+void WindowScreen::input_redirection_ip_octet_change(int octet, int delta) {
+	if(this->shared_data->ir_manager == NULL)
+		return;
+	ir::Config config = this->shared_data->ir_manager->get_config();
+	config.ip = ir::adjust_ipv4_octet(config.ip, octet, delta);
+	this->input_redirection_apply(config);
+}
+
 void WindowScreen::setup_action_selection_menu(bool reset_data) {
 	if(!this->can_setup_menu())
 		return;
@@ -1722,6 +1768,10 @@ void WindowScreen::poll(bool do_everything) {
 						this->setup_input_menu();
 						done = true;
 						break;
+					case MAIN_MENU_INPUT_REDIRECTION:
+						this->setup_input_redirection_menu();
+						done = true;
+						break;
 					case MAIN_MENU_IST_SETTINGS:
 					case MAIN_MENU_ISN_SETTINGS:
 						this->setup_is_nitro_menu();
@@ -2160,6 +2210,42 @@ void WindowScreen::poll(bool do_everything) {
 						break;
 					case EXTRA_SETTINGS_MENU_CHANGE_PERIODIC_CONNECTION_TRY:
 						this->shared_data->periodic_connection_try = !this->shared_data->periodic_connection_try;
+						break;
+					default:
+						break;
+				}
+				this->loaded_menu_ptr->reset_output_option();
+				break;
+			case INPUT_REDIRECTION_MENU_TYPE:
+				switch(this->input_redirection_menu->selected_index) {
+					case IR_MENU_BACK:
+						this->setup_main_menu(false);
+						done = true;
+						break;
+					case IR_MENU_NO_ACTION:
+						break;
+					case IR_MENU_TOGGLE_ENABLED:
+						this->input_redirection_enabled_change();
+						break;
+					case IR_MENU_IP_ADDRESS:
+						this->setup_input_redirection_ip_menu();
+						done = true;
+						break;
+					default:
+						break;
+				}
+				this->loaded_menu_ptr->reset_output_option();
+				break;
+			case INPUT_REDIRECTION_IP_MENU_TYPE:
+				switch(this->input_redirection_ip_menu->selected_index) {
+					case IR_IP_MENU_BACK:
+						this->setup_input_redirection_menu(false);
+						done = true;
+						break;
+					case IR_IP_MENU_NO_ACTION:
+						break;
+					case IR_IP_MENU_OCTET_CHANGE:
+						this->input_redirection_ip_octet_change(this->input_redirection_ip_menu->selected_octet, this->input_redirection_ip_menu->selected_delta);
 						break;
 					default:
 						break;
@@ -2995,6 +3081,18 @@ void WindowScreen::prepare_menu_draws(int view_size_x, int view_size_y) {
 			break;
 		case EXTRA_MENU_TYPE:
 			this->extra_menu->prepare(menu_scaling_factor, view_size_x, view_size_y, this->shared_data->periodic_connection_try);
+			break;
+		case INPUT_REDIRECTION_MENU_TYPE:
+			{
+				ir::Config ir_config = (this->shared_data->ir_manager != NULL) ? this->shared_data->ir_manager->get_config() : ir::Config();
+				this->input_redirection_menu->prepare(menu_scaling_factor, view_size_x, view_size_y, ir_config.enabled, ir_config.ip);
+			}
+			break;
+		case INPUT_REDIRECTION_IP_MENU_TYPE:
+			{
+				ir::Config ir_config = (this->shared_data->ir_manager != NULL) ? this->shared_data->ir_manager->get_config() : ir::Config();
+				this->input_redirection_ip_menu->prepare(menu_scaling_factor, view_size_x, view_size_y, ir_config.ip);
+			}
 			break;
 		case SHORTCUTS_MENU_TYPE:
 			this->shortcut_menu->prepare(menu_scaling_factor, view_size_x, view_size_y);

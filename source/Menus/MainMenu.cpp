@@ -82,6 +82,13 @@ static const MainMenuOptionInfo input_settings_option = {
 .enabled_normal_mode = true, .enabled_mono_mode = true, .is_cc_specific = false,
 .out_action = MAIN_MENU_INPUT_SETTINGS};
 
+static const MainMenuOptionInfo input_redirection_option = {
+.base_name = "Input Redirection", .false_name = "",
+.active_fullscreen = true, .active_windowed_screen = true,
+.active_joint_screen = true, .active_top_screen = true, .active_bottom_screen = true,
+.enabled_normal_mode = true, .enabled_mono_mode = true, .is_cc_specific = false,
+.out_action = MAIN_MENU_INPUT_REDIRECTION};
+
 static const MainMenuOptionInfo save_profiles_option = {
 .base_name = "Save Profile", .false_name = "",
 .active_fullscreen = true, .active_windowed_screen = true,
@@ -170,6 +177,7 @@ static const MainMenuOptionInfo* pollable_options[] = {
 &video_settings_option,
 &audio_settings_option,
 &input_settings_option,
+&input_redirection_option,
 &save_profiles_option,
 &load_profiles_option,
 //&shortcut_option,

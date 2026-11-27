@@ -732,6 +732,9 @@ static int mainVideoOutputCall(AudioData* audio_data, CaptureData* capture_data,
 	frontend_data.shared_data.ir_manager = &ir_manager;
 	if((!skip_io) && (!override_data.recovery_mode))
 		ir_manager.load(ir_cfg_path);
+	// Changes made from the Input Redirection menus are saved to the same file right away
+	if(!skip_io)
+		ir_manager.set_autosave_path(ir_cfg_path);
 	if(override_data.ir_ip != "") {
 		ir::Config ir_config = ir_manager.get_config();
 		ir_config.ip = override_data.ir_ip;

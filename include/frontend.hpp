@@ -26,6 +26,9 @@
 #include "ResolutionMenu.hpp"
 #include "FileConfigMenu.hpp"
 #include "ExtraSettingsMenu.hpp"
+#include "InputRedirectionMenu.hpp"
+#include "InputRedirectionIPMenu.hpp"
+#include "InputRedirection.hpp"
 #include "StatusMenu.hpp"
 #include "LicenseMenu.hpp"
 #include "ShortcutMenu.hpp"
@@ -211,6 +214,8 @@ private:
 	ResolutionMenu *resolution_menu;
 	FileConfigMenu *fileconfig_menu;
 	ExtraSettingsMenu *extra_menu;
+	InputRedirectionMenu *input_redirection_menu;
+	InputRedirectionIPMenu *input_redirection_ip_menu;
 	StatusMenu *status_menu;
 	LicenseMenu *license_menu;
 	ShortcutMenu *shortcut_menu;
@@ -438,6 +443,11 @@ private:
 	void setup_resolution_menu(bool reset_data = true);
 	void setup_audio_devices_menu(bool reset_data = true);
 	void setup_extra_menu(bool reset_data = true);
+	void setup_input_redirection_menu(bool reset_data = true);
+	void setup_input_redirection_ip_menu(bool reset_data = true);
+	void input_redirection_enabled_change();
+	void input_redirection_ip_octet_change(int octet, int delta);
+	void input_redirection_apply(const ir::Config &config);
 	void setup_shortcuts_menu(bool reset_data = true);
 	void setup_action_selection_menu(bool reset_data = true);
 	void setup_status_menu(bool reset_data = true);

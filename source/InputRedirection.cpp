@@ -155,6 +155,61 @@ static bool parse_float(const std::string &value, float &out, float min_v, float
 	}
 }
 
+bool parse_ipv4(const std::string &text, int octets[4]) {
+	int parsed[4];
+	size_t pos = 0;
+	for(int part = 0; part < 4; part++) {
+		size_t digits = 0;
+		int value = 0;
+		while((pos < text.size()) && (text[pos] >= '0') && (text[pos] <= '9')) {
+			value = (value * 10) + (text[pos] - '0');
+			pos++;
+			digits++;
+			if(digits > 3)
+				return false;
+		}
+		if((digits == 0) || (value > 255))
+			return false;
+		parsed[part] = value;
+		if(part < 3) {
+			if((pos >= text.size()) || (text[pos] != '.'))
+				return false;
+			pos++;
+		}
+	}
+	if(pos != text.size())
+		return false;
+	for(int i = 0; i < 4; i++)
+		octets[i] = parsed[i];
+	return true;
+}
+
+std::string format_ipv4(const int octets[4]) {
+	std::string out;
+	for(int i = 0; i < 4; i++) {
+		if(i > 0)
+			out += ".";
+		out += std::to_string(std::min(std::max(octets[i], 0), 255));
+	}
+	return out;
+}
+
+int step_octet(int value, int delta) {
+	int result = (value + delta) % 256;
+	if(result < 0)
+		result += 256;
+	return result;
+}
+
+std::string adjust_ipv4_octet(const std::string &ip, int octet, int delta) {
+	if((octet < 0) || (octet > 3))
+		return ip;
+	int octets[4] = {0, 0, 0, 0};
+	parse_ipv4(ip, octets); // Leaves the zeros if it isn't a plain number address
+	octets[octet] = step_octet(octets[octet], delta);
+	return format_ipv4(octets);
+}
+
 int save_config(const std::string &path, const Config &config) {
 	std::ofstream file(path);
 	if(!file.good())
@@ -517,6 +572,24 @@ int Manager::load(const std::string &path) {
 
 int Manager::save(const std::string &path) const {
 	return save_config(path, this->get_config());
+}
+
+void Manager::set_autosave_path(const std::string &path) {
+	std::lock_guard<std::mutex> lock(this->mtx);
+	this->autosave_path = path;
+}
+
+bool Manager::update_config_and_save(const Config &new_config) {
+	this->set_config(new_config);
+	std::string path;
+	{
+		std::lock_guard<std::mutex> lock(this->mtx);
+		path = this->autosave_path;
+	}
+	if(path.empty())
+		return true;
+	std::lock_guard<std::mutex> save_lock(this->save_mtx);
+	return this->save(path) == 0;
 }
 
 void Manager::update_joystick(const JoystickSnapshot &snapshot) {

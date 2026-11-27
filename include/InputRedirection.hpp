@@ -102,6 +102,18 @@ uint32_t encode_cpp(float x, float y, bool invert_y, uint32_t ir_buttons);
 uint32_t encode_touch(int x, int y, bool pressed);
 void encode_frame(uint8_t out[FRAME_SIZE], const RawState &raw, const TouchState &pointer_touch, uint32_t ui_interface_bits, const Config &config);
 
+// ---- IPv4 helpers, used by the settings menu ----
+// Strict dotted-quad parsing: exactly 4 numbers of 1-3 digits, each 0-255, nothing else
+// (no spaces, no hostnames). On failure octets is left untouched.
+bool parse_ipv4(const std::string &text, int octets[4]);
+std::string format_ipv4(const int octets[4]);
+// Adds delta to an octet, wrapping around inside 0-255 (so "-1" from 0 gives 255).
+int step_octet(int value, int delta);
+// Returns ip with one of its 4 numbers (octet 0-3) changed by delta, wrapping inside 0-255.
+// An empty or non-numeric ip (e.g. a hostname written by hand in the config) starts from 0.0.0.0.
+// An octet outside 0-3 returns ip unchanged.
+std::string adjust_ipv4_octet(const std::string &ip, int octet, int delta);
+
 // ---- Config I/O (key=value lines, same style as the rest of cc3dsfs) ----
 // Returns 0 on success, non-zero if the file could not be read/written.
 int load_config(const std::string &path, Config &config);
@@ -142,6 +154,11 @@ public:
 	void set_config(const Config &config);
 	int load(const std::string &path);
 	int save(const std::string &path) const;
+	// Where changes made from the menus are written to (empty = don't autosave).
+	void set_autosave_path(const std::string &path);
+	// Applies the config and, if an autosave path is set, writes it to disk right away.
+	// Returns false if the file could not be written (the config is still applied).
+	bool update_config_and_save(const Config &config);
 
 	// Called from the thread(s) which pump the window events.
 	void update_joystick(const JoystickSnapshot &snapshot);
@@ -163,6 +180,8 @@ private:
 	void build_frame(uint8_t out[FRAME_SIZE], bool neutral);
 
 	mutable std::mutex mtx;
+	std::mutex save_mtx; // Keeps two saves from writing the file at the same time
+	std::string autosave_path;
 	std::condition_variable cv;
 	std::thread worker;
 	bool running = false;
