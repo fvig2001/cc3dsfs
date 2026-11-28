@@ -142,6 +142,50 @@ cc3dsfs can send controller and touch input to a 3DS running [InputRedirection](
 - **Reconnection:** the 3DS side is UDP, so it is never really "connected". If the socket or address fails (network change, 3DS rebooting, hostname not resolving yet), the socket is rebuilt and the host re-resolved, retrying every 0.5s up to 5s. A notification shows when it starts failing and when it recovers. Note that a "sending" status means packets are leaving this computer, not that the 3DS received them. The capture card side uses the existing *Periodic connection try* option, which is now on by default.
 - **Settings** (all in `input_redirection.cfg`): `invert_y`, `invert_ab`, `invert_xy`, 19 bindings (`bind_a`, `bind_b`, ..., `bind_touch1`, `bind_touch2`) written as `button:N`, `axis+:N`, `axis-:N` or `none`, touch presets (`touch1_x/y`, `touch2_x/y`), `deadzone`, `touch_offset_x/y`, and which axes are the sticks. Axis numbers follow SFML's order: 0=X, 1=Y, 2=Z, 3=R, 4=U, 5=V, 6=PovX, 7=PovY. Use `--list_joysticks` to see what SFML detects.
 
+## Changing settings while running (`--update_settings`)
+
+Another program or script can change settings of a cc3dsfs which is already running:
+
+```
+cc3dsfs --update_settings bot_fullscreen=0 bot_have_titlebar=1
+cc3dsfs --update_settings ir_ip=192.168.1.50 ir_enabled=1
+```
+
+The running instance answers with what happened to each setting, and the command exits with `0` if everything was applied, `1` if some settings were refused, `2` if no cc3dsfs answered (not running, or a different `--control_port`) and `3` for a mistake in the command itself.
+
+```
+$ cc3dsfs --update_settings bot_fullscreen=0 nonsense=1
+OK bot_fullscreen
+ERROR nonsense: unknown setting
+DONE applied=1 failed=1
+```
+
+**Which settings:** the same names and values as in the layout `.cfg` files (the files saved by the *Save* option of the menu are a good reference).
+- Per window settings start with `top_`, `bot_` or `joint_`, followed by the name: `bot_fullscreen`, `top_have_titlebar`, `joint_scale`, `bot_vsync`, `top_rot`, ...
+- Global ones: `split`, `requested_3d`, `interleaved_3d`, `do_ratio_cycling`, `fixed_output_framerate`, `target_fixed_output_framerate`, and the audio ones: `volume`, `mute`, `audio_mode`, `audio_output_type`, `audio_output_device_name`, ...
+- Input Redirection settings start with `ir_` followed by the name used in `input_redirection.cfg`: `ir_ip`, `ir_enabled`, `ir_touch_enabled`, `ir_invert_y`, `ir_invert_ab`, `ir_invert_xy`, `ir_deadzone`, `ir_bind_home`, ... `ir_ip` takes an IPv4 address or a hostname, and an empty value clears it. Bad addresses such as `192.168.1` or `999.1.1.1` are refused.
+- Settings about the capture hardware (battery, scan lists, capture formats, ...) are refused: they are only loaded from files.
+
+**What happens:** window settings are applied the same way as when a layout is loaded, so the windows are set up again only if something really changed. Changes to layout settings are not written to any layout file (use the *Save* option for that). `ir_` changes are saved to `input_redirection.cfg` right away, like the changes made from the menu. Settings in the same command are independent: if one is refused, the others are still applied.
+
+**How it works:** the running cc3dsfs listens on UDP port `47951` of the local computer (`127.0.0.1` only, nothing from the network can reach it). Use `--control_port N` to pick another port (also for the `--update_settings` command), or `--control_port 0` to turn the feature off. Any program running on the same computer can send settings, so keep that in mind on a shared machine.
+
+A script doesn't need to call the executable. It can send one UDP datagram to `127.0.0.1:47951` with these lines, and read the reply in the format shown above:
+
+```
+CC3DSFS-UPDATE-SETTINGS 1
+bot_fullscreen=0
+ir_ip=192.168.1.50
+```
+
+```python
+import socket
+s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+s.settimeout(3)
+s.sendto(b"CC3DSFS-UPDATE-SETTINGS 1\nbot_fullscreen=0\nbot_have_titlebar=1\n", ("127.0.0.1", 47951))
+print(s.recv(65536).decode())
+```
+
 ## Profiles/Layouts
 
 When starting the program for the first time, a message indicating a load failure for the cc3dsfs.cfg file will be displayed, and the same will occur when attempting to load from any given layout file if it hasn't been saved to before. That is normal. These files must be created by the program first before they can be loaded from. The program saves its current configuration to the cc3dsfs.cfg file when the program is successfully closed, creating the file if it doesn't already exist, and loading from it every time at startup.

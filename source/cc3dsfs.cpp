@@ -1,4 +1,5 @@
 #include "InputRedirection.hpp"
+#include "ControlServer.hpp"
 #include <SFML/Audio.hpp>
 #include <SFML/Graphics.hpp>
 
@@ -48,6 +49,7 @@ struct override_all_data {
 	bool always_prevent_mouse_showing = false;
 	bool auto_connect_to_first = false;
 	std::string ir_ip = "";
+	int control_port = ctl::DEFAULT_PORT; // Port for --update_settings. 0 turns it off
 	bool ir_debug = false;
 	bool auto_close = false;
 	bool force_disable_nisetro_ds = false;
@@ -157,6 +159,149 @@ static bool load_shared(const std::string path, const std::string name, SharedDa
 	return result;
 }
 
+// Settings which only change how things are shown or played. Used when loading a layout file,
+// and also when settings are changed from outside while running (--update_settings).
+// Returns true if the key was recognized (and applied). Bad values throw, like the numbers parsing does.
+static bool load_layout_display_line(const std::string &key, const std::string &value, ScreenInfo &top_info, ScreenInfo &bottom_info, ScreenInfo &joint_info, DisplayData &display_data, AudioData *audio_data, CaptureStatus* capture_status, bool &loaded_3d_request) {
+		if(load_screen_info(key, value, "bot_", bottom_info))
+			return true;
+		if(load_screen_info(key, value, "joint_", joint_info))
+			return true;
+		if(load_screen_info(key, value, "top_", top_info))
+			return true;
+
+		if(key == "split") {
+			bool split = std::stoi(value);
+			joint_info.window_enabled = !split;
+			top_info.window_enabled = split;
+			bottom_info.window_enabled = split;
+			return true;
+		}
+
+		if(key == "requested_3d") {
+			set_3d_enabled(capture_status, std::stoi(value));
+			loaded_3d_request = true;
+			return true;
+		}
+
+		if(key == "interleaved_3d") {
+			display_data.interleaved_3d = std::stoi(value);
+			return true;
+		}
+
+		if(key == "do_ratio_cycling") {
+			display_data.do_ratio_cycling = std::stoi(value);
+			return true;
+		}
+
+		if(key == "fixed_output_framerate") {
+			display_data.fixed_output_framerate = std::stoi(value);
+			return true;
+		}
+
+		if(key == "target_fixed_output_framerate") {
+			display_data.target_fixed_output_framerate = std::stod(value);
+			return true;
+		}
+
+		if(audio_data->load_audio_data(key, value))
+			return true;
+	return false;
+}
+
+// Settings which are about the connected capture hardware (battery, scan lists, capture formats...).
+// Only for loading layout files: they are not accepted from outside while running.
+static bool load_layout_device_line(const std::string &key, const std::string &value, DisplayData &display_data, CaptureStatus* capture_status) {
+		if(key == "request_low_bw_format") {
+			capture_status->device_specific_status.optimize_status.request_low_bw_format = std::stoi(value);
+			return true;
+		}
+
+		if(key == "request_low_bw_format_optimize") {
+			capture_status->device_specific_status.optimize_status.request_low_bw_format = std::stoi(value);
+			return true;
+		}
+
+		if(key == "request_low_bw_format_old_2ds_optimize") {
+			capture_status->device_specific_status.optimize_status.request_low_bw_format_old_2ds = std::stoi(value);
+			return true;
+		}
+
+		if(key == "last_connected_ds") {
+			display_data.last_connected_ds = std::stoi(value);
+			return true;
+		}
+
+		if(key == "is_screen_capture_type") {
+			capture_status->device_specific_status.is_status.capture_type =  static_cast<CaptureScreensType>(std::stoi(value) % CaptureScreensType::CAPTURE_SCREENS_ENUM_END);
+			return true;
+		}
+
+		if(key == "is_speed_capture") {
+			capture_status->device_specific_status.is_status.capture_speed =  static_cast<CaptureSpeedsType>(std::stoi(value) % CaptureSpeedsType::CAPTURE_SPEEDS_ENUM_END);
+			return true;
+		}
+
+		if(key == "is_battery_percentage") {
+			capture_status->device_specific_status.is_status.battery_percentage =  std::stoi(value);
+			// Even though 1 is allowed, it spam-resets the Hardware...
+			// So don't allow it as the initial value!
+			if(capture_status->device_specific_status.is_status.battery_percentage <= 5)
+				capture_status->device_specific_status.is_status.battery_percentage = 5;
+			if(capture_status->device_specific_status.is_status.battery_percentage > 100)
+				capture_status->device_specific_status.is_status.battery_percentage = 100;
+			return true;
+		}
+
+		if(key == "is_ac_adapter_connected") {
+			capture_status->device_specific_status.is_status.ac_adapter_connected =  std::stoi(value);
+			return true;
+		}
+
+		if(key == "partner_ctr_battery_percentage") {
+			capture_status->device_specific_status.partner_ctr_status.battery_percentage =  std::stoi(value);
+			// Even though 0 is allowed, it turns off the Hardware...
+			// So don't allow it as the initial value!
+			if(capture_status->device_specific_status.partner_ctr_status.battery_percentage <= 1)
+				capture_status->device_specific_status.partner_ctr_status.battery_percentage = 1;
+			if(capture_status->device_specific_status.partner_ctr_status.battery_percentage > 100)
+				capture_status->device_specific_status.partner_ctr_status.battery_percentage = 100;
+			return true;
+		}
+
+		if(key == "partner_ctr_ac_adapter_connected") {
+			capture_status->device_specific_status.partner_ctr_status.ac_adapter_connected =  std::stoi(value);
+			return true;
+		}
+
+		if(key == "partner_ctr_ac_adapter_charging") {
+			capture_status->device_specific_status.partner_ctr_status.ac_adapter_charging =  std::stoi(value);
+			return true;
+		}
+
+		if(key == "optimize_o3ds_scan_for") {
+			capture_status->devices_allowed_scan[CC_OPTIMIZE_O3DS] = std::stoi(value);
+			return true;
+		}
+
+		if(key == "optimize_n3dsv2_scan_for") {
+			capture_status->devices_allowed_scan[CC_OPTIMIZE_N3DSV2] = std::stoi(value);
+			return true;
+		}
+
+		if(key == "optimize_oo2ds_scan_for") {
+			capture_status->devices_allowed_scan[CC_OPTIMIZE_O_O2DS] = std::stoi(value);
+			return true;
+		}
+
+		if(key == "nisetro_ds_scan_for") {
+			capture_status->devices_allowed_scan[CC_NISETRO_DS] = std::stoi(value);
+			return true;
+		}
+
+	return false;
+}
+
 static bool load(const std::string path, const std::string name, ScreenInfo &top_info, ScreenInfo &bottom_info, ScreenInfo &joint_info, DisplayData &display_data, AudioData *audio_data, OutTextData &out_text_data, CaptureStatus* capture_status) {
 	std::string version_loaded = "";
 	std::ifstream file(path + name);
@@ -182,140 +327,15 @@ static bool load(const std::string path, const std::string name, ScreenInfo &top
 			if(!std::getline(kvp, value))
 				continue;
 
-			if(load_screen_info(key, value, "bot_", bottom_info))
-				continue;
-			if(load_screen_info(key, value, "joint_", joint_info))
-				continue;
-			if(load_screen_info(key, value, "top_", top_info))
-				continue;
-
 			if(key == "version") {
 				version_loaded = value;
 				continue;
 			}
 
-			if(key == "split") {
-				bool split = std::stoi(value);
-				joint_info.window_enabled = !split;
-				top_info.window_enabled = split;
-				bottom_info.window_enabled = split;
+			if(load_layout_display_line(key, value, top_info, bottom_info, joint_info, display_data, audio_data, capture_status, loaded_3d_request))
 				continue;
-			}
 
-			if(key == "requested_3d") {
-				set_3d_enabled(capture_status, std::stoi(value));
-				loaded_3d_request = true;
-				continue;
-			}
-
-			if(key == "interleaved_3d") {
-				display_data.interleaved_3d = std::stoi(value);
-				continue;
-			}
-
-			if(key == "do_ratio_cycling") {
-				display_data.do_ratio_cycling = std::stoi(value);
-				continue;
-			}
-
-			if(key == "fixed_output_framerate") {
-				display_data.fixed_output_framerate = std::stoi(value);
-				continue;
-			}
-
-			if(key == "target_fixed_output_framerate") {
-				display_data.target_fixed_output_framerate = std::stod(value);
-				continue;
-			}
-
-			if(key == "request_low_bw_format") {
-				capture_status->device_specific_status.optimize_status.request_low_bw_format = std::stoi(value);
-				continue;
-			}
-
-			if(key == "request_low_bw_format_optimize") {
-				capture_status->device_specific_status.optimize_status.request_low_bw_format = std::stoi(value);
-				continue;
-			}
-
-			if(key == "request_low_bw_format_old_2ds_optimize") {
-				capture_status->device_specific_status.optimize_status.request_low_bw_format_old_2ds = std::stoi(value);
-				continue;
-			}
-
-			if(key == "last_connected_ds") {
-				display_data.last_connected_ds = std::stoi(value);
-				continue;
-			}
-
-			if(key == "is_screen_capture_type") {
-				capture_status->device_specific_status.is_status.capture_type =  static_cast<CaptureScreensType>(std::stoi(value) % CaptureScreensType::CAPTURE_SCREENS_ENUM_END);
-				continue;
-			}
-
-			if(key == "is_speed_capture") {
-				capture_status->device_specific_status.is_status.capture_speed =  static_cast<CaptureSpeedsType>(std::stoi(value) % CaptureSpeedsType::CAPTURE_SPEEDS_ENUM_END);
-				continue;
-			}
-
-			if(key == "is_battery_percentage") {
-				capture_status->device_specific_status.is_status.battery_percentage =  std::stoi(value);
-				// Even though 1 is allowed, it spam-resets the Hardware...
-				// So don't allow it as the initial value!
-				if(capture_status->device_specific_status.is_status.battery_percentage <= 5)
-					capture_status->device_specific_status.is_status.battery_percentage = 5;
-				if(capture_status->device_specific_status.is_status.battery_percentage > 100)
-					capture_status->device_specific_status.is_status.battery_percentage = 100;
-				continue;
-			}
-
-			if(key == "is_ac_adapter_connected") {
-				capture_status->device_specific_status.is_status.ac_adapter_connected =  std::stoi(value);
-				continue;
-			}
-
-			if(key == "partner_ctr_battery_percentage") {
-				capture_status->device_specific_status.partner_ctr_status.battery_percentage =  std::stoi(value);
-				// Even though 0 is allowed, it turns off the Hardware...
-				// So don't allow it as the initial value!
-				if(capture_status->device_specific_status.partner_ctr_status.battery_percentage <= 1)
-					capture_status->device_specific_status.partner_ctr_status.battery_percentage = 1;
-				if(capture_status->device_specific_status.partner_ctr_status.battery_percentage > 100)
-					capture_status->device_specific_status.partner_ctr_status.battery_percentage = 100;
-				continue;
-			}
-
-			if(key == "partner_ctr_ac_adapter_connected") {
-				capture_status->device_specific_status.partner_ctr_status.ac_adapter_connected =  std::stoi(value);
-				continue;
-			}
-
-			if(key == "partner_ctr_ac_adapter_charging") {
-				capture_status->device_specific_status.partner_ctr_status.ac_adapter_charging =  std::stoi(value);
-				continue;
-			}
-
-			if(key == "optimize_o3ds_scan_for") {
-				capture_status->devices_allowed_scan[CC_OPTIMIZE_O3DS] = std::stoi(value);
-				continue;
-			}
-
-			if(key == "optimize_n3dsv2_scan_for") {
-				capture_status->devices_allowed_scan[CC_OPTIMIZE_N3DSV2] = std::stoi(value);
-				continue;
-			}
-
-			if(key == "optimize_oo2ds_scan_for") {
-				capture_status->devices_allowed_scan[CC_OPTIMIZE_O_O2DS] = std::stoi(value);
-				continue;
-			}
-
-			if(key == "nisetro_ds_scan_for") {
-				capture_status->devices_allowed_scan[CC_NISETRO_DS] = std::stoi(value);
-				continue;
-			}
-
-			if(audio_data->load_audio_data(key, value))
+			if(load_layout_device_line(key, value, display_data, capture_status))
 				continue;
 		}
 		if(!loaded_3d_request)
@@ -714,6 +734,146 @@ static bool should_do_periodic_connection_try(SharedData* shared_data, bool conn
 	return diff.count() >= PERIOD_CONNECTION_TRY_TIMEOUT;
 }
 
+// ---------------------------------------------------------------------------
+// Settings changed from outside while running: cc3dsfs --update_settings name=value ...
+// (see ControlServer.hpp). This runs on the main loop thread, which is the same one which
+// changes these settings when a layout is loaded.
+// ---------------------------------------------------------------------------
+
+// Hardware related names which load_layout_device_line() accepts from files, but which
+// aren't accepted from outside. Only used to give a clearer error message.
+static bool is_device_setting_name(const std::string &key) {
+	static const char* const names[] = {
+		"request_low_bw_format", "request_low_bw_format_optimize", "request_low_bw_format_old_2ds_optimize",
+		"last_connected_ds", "is_screen_capture_type", "is_speed_capture", "is_battery_percentage",
+		"is_ac_adapter_connected", "partner_ctr_battery_percentage", "partner_ctr_ac_adapter_connected",
+		"partner_ctr_ac_adapter_charging", "optimize_o3ds_scan_for", "optimize_n3dsv2_scan_for",
+		"optimize_oo2ds_scan_for", "nisetro_ds_scan_for"};
+	for(const char* name : names)
+		if(key == name)
+			return true;
+	return false;
+}
+
+// Everything which, when changed, means the windows have to be set up again
+static std::string layout_state_text(FrontendData *frontend_data, CaptureStatus *capture_status) {
+	std::string out = save_screen_info("top_", frontend_data->top_screen->m_info);
+	out += save_screen_info("bot_", frontend_data->bot_screen->m_info);
+	out += save_screen_info("joint_", frontend_data->joint_screen->m_info);
+	out += "interleaved_3d=" + std::to_string(frontend_data->display_data.interleaved_3d) + "\n";
+	out += "do_ratio_cycling=" + std::to_string(frontend_data->display_data.do_ratio_cycling) + "\n";
+	out += "fixed_output_framerate=" + std::to_string(frontend_data->display_data.fixed_output_framerate) + "\n";
+	out += "target_fixed_output_framerate=" + std::to_string(frontend_data->display_data.target_fixed_output_framerate) + "\n";
+	out += "3d=" + std::to_string(get_3d_enabled(capture_status)) + "\n";
+	return out;
+}
+
+static bool apply_external_layout_setting(const std::string &key, const std::string &value, FrontendData *frontend_data, AudioData *audio_data, CaptureStatus *capture_status, std::string &error) {
+	bool loaded_3d_request = false; // Only matters when loading a whole file
+	try {
+		if(load_layout_display_line(key, value, frontend_data->top_screen->m_info, frontend_data->bot_screen->m_info, frontend_data->joint_screen->m_info, frontend_data->display_data, audio_data, capture_status, loaded_3d_request))
+			return true;
+	}
+	catch(...) {
+		error = "invalid value '" + value + "'";
+		return false;
+	}
+	if(is_device_setting_name(key))
+		error = "this setting is about the capture hardware and can't be changed from outside";
+	else if(key == "version")
+		error = "not a setting";
+	else
+		error = "unknown setting";
+	return false;
+}
+
+static bool apply_external_ir_setting(ir::Config &config, const std::string &key, const std::string &value, std::string &error) {
+	if((key == "ip") && (!ir::is_valid_host(value))) {
+		error = "'" + value + "' is not a valid IPv4 address or hostname";
+		return false;
+	}
+	switch(ir::apply_config_setting(config, key, value)) {
+		case ir::SettingResult::APPLIED:
+			return true;
+		case ir::SettingResult::BAD_VALUE:
+			error = "invalid value '" + value + "'";
+			return false;
+		default:
+			error = "unknown Input Redirection setting";
+			return false;
+	}
+}
+
+static std::vector<ctl::Result> apply_external_settings(const std::vector<ctl::Setting> &settings, FrontendData *frontend_data, AudioData *audio_data, CaptureStatus *capture_status, ir::Manager &ir_manager) {
+	std::vector<ctl::Result> results;
+	const std::string state_before = layout_state_text(frontend_data, capture_status);
+	ir::Config ir_config = ir_manager.get_config();
+	bool layout_applied = false;
+	bool ir_applied = false;
+
+	for(const ctl::Setting &setting : settings) {
+		std::string error;
+		bool ok;
+		// "ir_" settings are the ones of input_redirection.cfg: ir_ip, ir_enabled, ir_invert_y, ir_bind_home...
+		if(setting.key.compare(0, 3, "ir_") == 0) {
+			ok = apply_external_ir_setting(ir_config, setting.key.substr(3), setting.value, error);
+			ir_applied = ir_applied || ok;
+		}
+		else {
+			ok = apply_external_layout_setting(setting.key, setting.value, frontend_data, audio_data, capture_status, error);
+			layout_applied = layout_applied || ok;
+		}
+		results.push_back({setting.key, ok, error});
+	}
+
+	if(layout_applied) {
+		sanitize_enabled_info(frontend_data->joint_screen->m_info, frontend_data->top_screen->m_info, frontend_data->bot_screen->m_info);
+		sanitize_display_data(&frontend_data->display_data);
+		// Setting the windows up again flickers, so only do it if something actually changed
+		if(layout_state_text(frontend_data, capture_status) != state_before)
+			frontend_data->reload = true;
+	}
+	if(ir_applied && (!ir_manager.update_config_and_save(ir_config)))
+		results.push_back({"input_redirection.cfg", false, "the settings were applied, but could not be saved to the file"});
+	return results;
+}
+
+static int run_update_settings_client(int argc, char **argv) {
+	int port = ctl::DEFAULT_PORT;
+	bool update_mode = false;
+	std::vector<std::string> assignments;
+	for(int i = 1; i < argc; i++) {
+		const std::string arg = argv[i];
+		if(arg == "--update_settings") {
+			update_mode = true;
+			continue;
+		}
+		if(arg == "--control_port") {
+			try {
+				port = std::stoi((i + 1 < argc) ? argv[i + 1] : "x");
+				i++;
+			}
+			catch(...) {
+				fputs("Error with input for: --control_port\n", stderr);
+				return ctl::CLIENT_BAD_USAGE;
+			}
+			continue;
+		}
+		if(update_mode)
+			assignments.push_back(arg);
+	}
+	if((port < 0) || (port > 65535)) {
+		fputs("The control port must be between 1 and 65535\n", stderr);
+		return ctl::CLIENT_BAD_USAGE;
+	}
+	std::string output;
+	const int code = ctl::send_update((uint16_t)port, assignments, 3000, output);
+	fputs(output.c_str(), (code == ctl::CLIENT_OK) ? stdout : stderr);
+	if(assignments.empty())
+		fputs("Usage: cc3dsfs --update_settings name=value [name=value ...]\nExample: cc3dsfs --update_settings bot_fullscreen=0 bot_have_titlebar=1 ir_ip=192.168.1.50\n", stderr);
+	return code;
+}
+
 static int mainVideoOutputCall(AudioData* audio_data, CaptureData* capture_data, override_all_data &override_data, volatile bool* can_do_output) {
 	VideoOutputData *out_buf;
 	double last_frame_time = 0.0;
@@ -742,6 +902,7 @@ static int mainVideoOutputCall(AudioData* audio_data, CaptureData* capture_data,
 		ir_manager.set_config(ir_config);
 	}
 	ir_manager.start();
+	ctl::Server control_server;
 	bool did_first_connection = false;
 	const double max_time_no_frames_allowed = MAX_ALLOWED_NO_FRAME_TIME;
 	std::chrono::time_point<std::chrono::high_resolution_clock> start_time = std::chrono::high_resolution_clock::now();
@@ -749,6 +910,13 @@ static int mainVideoOutputCall(AudioData* audio_data, CaptureData* capture_data,
 	std::chrono::time_point<std::chrono::high_resolution_clock> last_output_check_time = start_time;
 	std::chrono::time_point<std::chrono::high_resolution_clock> last_connection_time = start_time;
 	OutTextData out_text_data;
+
+	// Lets a script change settings while running: cc3dsfs --update_settings name=value ...
+	if((override_data.control_port > 0) && (override_data.control_port <= 65535)) {
+		std::string control_error;
+		if(!control_server.start((uint16_t)override_data.control_port, control_error))
+			UpdateOutText(out_text_data, "Settings control disabled: " + control_error, "Settings control disabled", TEXT_KIND_WARNING);
+	}
 	int ret_val = 0;
 	int poll_timeout = 0;
 	const bool endianness = is_big_endian();
@@ -940,6 +1108,10 @@ static int mainVideoOutputCall(AudioData* audio_data, CaptureData* capture_data,
 			UpdateOutText(out_text_data, "", audio_data->text_to_print(), TEXT_KIND_NORMAL);
 		}
 
+		control_server.poll([&](const std::vector<ctl::Setting> &settings) {
+			return apply_external_settings(settings, &frontend_data, audio_data, &capture_data->status, ir_manager);
+		});
+
 		ir::Status ir_status;
 		std::string ir_text;
 		if(ir_manager.consume_status_change(ir_status, ir_text))
@@ -1122,6 +1294,10 @@ static bool parse_string_arg(int &index, int argc, char **argv, std::string &tar
 }
 
 int main(int argc, char **argv) {
+	// "--update_settings name=value ...": talks to an already running cc3dsfs instead of starting a new one
+	for(int i = 1; i < argc; i++)
+		if(std::string(argv[i]) == "--update_settings")
+			return run_update_settings_client(argc, argv);
 	init_threads();
 	init_start_time();
 	int page_up_id = -1;
@@ -1198,6 +1374,8 @@ int main(int argc, char **argv) {
 			continue;
 		if(parse_string_arg(i, argc, argv, override_data.ir_ip, "--ir_ip"))
 			continue;
+		if(parse_int_arg(i, argc, argv, override_data.control_port, "--control_port"))
+			continue;
 		if(parse_existence_arg(i, argv, override_data.ir_debug, true, "--ir_debug"))
 			continue;
 		#ifdef RASPI
@@ -1259,6 +1437,10 @@ int main(int argc, char **argv) {
 		ActualConsoleOutText("  --touch_file      Path of a file that the program should create when exiting.");
 		ActualConsoleOutText("  --ir_ip IP        Sends controller/touch input to the 3DS at IP (InputRedirection).");
 		ActualConsoleOutText("                    Enables input redirection and saves the address.");
+		ActualConsoleOutText("  --update_settings name=value ...");
+		ActualConsoleOutText("                    Changes settings of a cc3dsfs which is already running, e.g.");
+		ActualConsoleOutText("                    --update_settings bot_fullscreen=0 bot_have_titlebar=1 ir_ip=192.168.1.50");
+		ActualConsoleOutText("  --control_port N  Local port used by --update_settings (default 47951). 0 turns it off.");
 		ActualConsoleOutText("  --ir_debug        Prints which controller buttons/axes are pressed (to find the numbers for bindings).");
 		#ifdef RASPI
 		ActualConsoleOutText("  --pi_select ID    Specifies ID for the select GPIO button.");

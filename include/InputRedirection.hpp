@@ -115,6 +115,12 @@ int step_octet(int value, int delta);
 std::string adjust_ipv4_octet(const std::string &ip, int octet, int delta);
 
 // ---- Config I/O (key=value lines, same style as the rest of cc3dsfs) ----
+enum class SettingResult { APPLIED, UNKNOWN_KEY, BAD_VALUE };
+// Sets one setting by the same name used in input_redirection.cfg (e.g. "ip", "invert_y", "bind_home").
+// Out of range numbers are clamped, as when loading the file.
+SettingResult apply_config_setting(Config &config, const std::string &key, const std::string &value);
+// Whether text is acceptable as the 3DS address: empty (clears it), a hostname, or a proper IPv4 address.
+bool is_valid_host(const std::string &host);
 // Returns 0 on success, non-zero if the file could not be read/written.
 int load_config(const std::string &path, Config &config);
 int save_config(const std::string &path, const Config &config);

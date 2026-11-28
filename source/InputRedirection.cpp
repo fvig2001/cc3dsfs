@@ -236,6 +236,74 @@ int save_config(const std::string &path, const Config &config) {
 	return file.good() ? 0 : 1;
 }
 
+SettingResult apply_config_setting(Config &config, const std::string &key, const std::string &value) {
+	auto set_bool = [&](bool &field) {
+		int v = 0;
+		if(!parse_int(value, v, 0, 1))
+			return SettingResult::BAD_VALUE;
+		field = v;
+		return SettingResult::APPLIED;
+	};
+	auto set_int = [&](int &field, int min_v, int max_v) {
+		return parse_int(value, field, min_v, max_v) ? SettingResult::APPLIED : SettingResult::BAD_VALUE;
+	};
+
+	if(key == "enabled") return set_bool(config.enabled);
+	if(key == "ip") { config.ip = value; return SettingResult::APPLIED; }
+	if(key == "touch_enabled") return set_bool(config.touch_enabled);
+	if(key == "invert_y") return set_bool(config.invert_y);
+	if(key == "invert_ab") return set_bool(config.invert_ab);
+	if(key == "invert_xy") return set_bool(config.invert_xy);
+	if(key == "deadzone") return parse_float(value, config.deadzone, 0.0f, 0.95f) ? SettingResult::APPLIED : SettingResult::BAD_VALUE;
+	if(key == "touch_offset_x") return set_int(config.touch_offset_x, -TOUCH_SCREEN_WIDTH, TOUCH_SCREEN_WIDTH);
+	if(key == "touch_offset_y") return set_int(config.touch_offset_y, -TOUCH_SCREEN_HEIGHT, TOUCH_SCREEN_HEIGHT);
+	if(key == "touch1_x") return set_int(config.touch1_x, 0, TOUCH_SCREEN_WIDTH);
+	if(key == "touch1_y") return set_int(config.touch1_y, 0, TOUCH_SCREEN_HEIGHT);
+	if(key == "touch2_x") return set_int(config.touch2_x, 0, TOUCH_SCREEN_WIDTH);
+	if(key == "touch2_y") return set_int(config.touch2_y, 0, TOUCH_SCREEN_HEIGHT);
+	if(key == "left_x_axis") return set_int(config.left_x_axis, 0, NUM_JOY_AXES - 1);
+	if(key == "left_y_axis") return set_int(config.left_y_axis, 0, NUM_JOY_AXES - 1);
+	if(key == "right_x_axis") return set_int(config.right_x_axis, 0, NUM_JOY_AXES - 1);
+	if(key == "right_y_axis") return set_int(config.right_y_axis, 0, NUM_JOY_AXES - 1);
+	if(key.compare(0, 5, "bind_") == 0) {
+		std::string name = key.substr(5);
+		for(int slot = 0; slot < SLOT_COUNT; slot++) {
+			if(name == slot_names[slot]) {
+				PhysicalInput input;
+				if(!parse_input(value, input))
+					return SettingResult::BAD_VALUE;
+				config.bindings[slot] = input;
+				return SettingResult::APPLIED;
+			}
+		}
+	}
+	return SettingResult::UNKNOWN_KEY;
+}
+
+bool is_valid_host(const std::string &host) {
+	if(host.empty())
+		return true; // Clears the address
+	if(host.size() > 253)
+		return false;
+	if((host[0] == '.') || (host[0] == '-'))
+		return false;
+	bool only_digits_and_dots = true;
+	for(char c : host) {
+		const bool is_digit = (c >= '0') && (c <= '9');
+		const bool is_letter = ((c >= 'a') && (c <= 'z')) || ((c >= 'A') && (c <= 'Z'));
+		if(!(is_digit || is_letter || (c == '.') || (c == '-') || (c == '_')))
+			return false;
+		if(!(is_digit || (c == '.')))
+			only_digits_and_dots = false;
+	}
+	if(only_digits_and_dots) {
+		// Looks like a number address, so it has to be a proper one ("192.168.1" or "999.1.1.1" are mistakes)
+		int octets[4];
+		return parse_ipv4(host, octets);
+	}
+	return true;
+}
+
 int load_config(const std::string &path, Config &config) {
 	std::ifstream file(path);
 	if(!file.good())
@@ -247,37 +315,8 @@ int load_config(const std::string &path, Config &config) {
 		size_t eq = line.find('=');
 		if(eq == std::string::npos)
 			continue;
-		std::string key = line.substr(0, eq);
-		std::string value = line.substr(eq + 1);
-		int i = 0;
-		if(key == "enabled") { if(parse_int(value, i, 0, 1)) config.enabled = i; }
-		else if(key == "ip") config.ip = value;
-		else if(key == "touch_enabled") { if(parse_int(value, i, 0, 1)) config.touch_enabled = i; }
-		else if(key == "invert_y") { if(parse_int(value, i, 0, 1)) config.invert_y = i; }
-		else if(key == "invert_ab") { if(parse_int(value, i, 0, 1)) config.invert_ab = i; }
-		else if(key == "invert_xy") { if(parse_int(value, i, 0, 1)) config.invert_xy = i; }
-		else if(key == "deadzone") parse_float(value, config.deadzone, 0.0f, 0.95f);
-		else if(key == "touch_offset_x") parse_int(value, config.touch_offset_x, -TOUCH_SCREEN_WIDTH, TOUCH_SCREEN_WIDTH);
-		else if(key == "touch_offset_y") parse_int(value, config.touch_offset_y, -TOUCH_SCREEN_HEIGHT, TOUCH_SCREEN_HEIGHT);
-		else if(key == "touch1_x") parse_int(value, config.touch1_x, 0, TOUCH_SCREEN_WIDTH);
-		else if(key == "touch1_y") parse_int(value, config.touch1_y, 0, TOUCH_SCREEN_HEIGHT);
-		else if(key == "touch2_x") parse_int(value, config.touch2_x, 0, TOUCH_SCREEN_WIDTH);
-		else if(key == "touch2_y") parse_int(value, config.touch2_y, 0, TOUCH_SCREEN_HEIGHT);
-		else if(key == "left_x_axis") parse_int(value, config.left_x_axis, 0, NUM_JOY_AXES - 1);
-		else if(key == "left_y_axis") parse_int(value, config.left_y_axis, 0, NUM_JOY_AXES - 1);
-		else if(key == "right_x_axis") parse_int(value, config.right_x_axis, 0, NUM_JOY_AXES - 1);
-		else if(key == "right_y_axis") parse_int(value, config.right_y_axis, 0, NUM_JOY_AXES - 1);
-		else if(key.compare(0, 5, "bind_") == 0) {
-			std::string name = key.substr(5);
-			for(int s = 0; s < SLOT_COUNT; s++) {
-				if(name == slot_names[s]) {
-					PhysicalInput p;
-					if(parse_input(value, p))
-						config.bindings[s] = p;
-					break;
-				}
-			}
-		}
+		// Bad values and unknown keys are skipped, as always
+		apply_config_setting(config, line.substr(0, eq), line.substr(eq + 1));
 	}
 	return 0;
 }
